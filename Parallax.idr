@@ -1,4 +1,4 @@
-module Parsing
+module Parallax
 
 class Monad m => MonadPlus (m : Type -> Type) where
     mzero : m a
@@ -102,5 +102,3 @@ instance Show IdrisC where
 idrDirective = do
   _ <- char '#' -}
     
-
-
