@@ -4,101 +4,77 @@ class Monad m => MonadPlus (m : Type -> Type) where
     mzero : m a
     mplus : m a -> m a -> m a
 
-data Result e a = Failed e | Parsed a
+data Result e a = Failed String e 
+                | Parsed String a
 
 instance Functor (Result e) where
-  map _ (Failed e) = Failed e
-  map f (Parsed x) = Parsed (f x)
-
-instance Applicative (Result e) where
-    pure x = Parsed x
-
-    (Failed e) <$> _ = Failed e
-    _ <$> (Failed e) = Failed e
-    (Parsed f) <$> (Parsed x) = Parsed (f x)
+  map _ (Failed r e) = Failed r e
+  map f (Parsed r x) = Parsed r (f x)
     
-data Parser a = MkParser (String -> (String, Result String a))
+data Parser a = MkParser (String -> Result String a)
 
 instance Functor Parser where
-    map g (MkParser f) = MkParser $ \input =>
-        let (rest, r) = f input in
-            (rest, map g r)
+    map g (MkParser f) = MkParser $ \input => map g $ f input
 
 instance Applicative Parser where
-    pure x = MkParser $ \input => (input, Parsed x)
+    pure x = MkParser (\input => Parsed input x)
 
-    (MkParser f) <$> (MkParser g) = MkParser $ \input =>
-        let (r, f') = f input in
-        let (r', x) = g r
-        in (r', f' <$> x)
-         
-instance Monad Parser where
-  (MkParser f) >>= g = MkParser $ \input =>
-    case f input of
-        (rest, Failed e) => (rest, Failed e)
-        (rest, Parsed x) => 
-            let (MkParser h) = g x 
-            in h rest
-
-choice : Parser a -> Parser a -> Parser a
-choice (MkParser f) (MkParser g) = MkParser $ \input =>
-    case f input of
-        (_, Failed _) => g input
-        result => result
-
-instance MonadPlus Parser where
-    mzero = MkParser $ \input => (input, Failed "ParserZero: no parsing to be performed.")
-    mplus = choice
-
+    (MkParser f) <$> x = MkParser $ \input => case f input of
+        Failed r e  => Failed r e
+        Parsed r f' => let (MkParser x') = x in map f' (x' r)
+        
 instance Alternative Parser where
-    empty = mzero
-    m1 <|> m2 = mplus m1 m2
+    empty = MkParser $ \input => Failed input "ParserZero: no parsing to be performed."
+    (MkParser a1) <|> a2 = MkParser $ \input =>
+      case a1 input of
+        Failed r e => let (MkParser a2') = a2 in a2' r
+        result     => result
+
+instance Monad Parser where
+    (MkParser m) >>= f = MkParser $ \input =>
+        case m input of
+            Failed r e => Failed r e
+            Parsed r x => 
+                let (MkParser f') = f x
+                in f' r
 
 satisfy : (Char -> Bool) -> Parser Char
-satisfy f = MkParser $ \input =>
-    let c  = strHead input in
-    let cs = strTail input in
-    if (f c) then (cs, Parsed c) else (input, Failed ("Found " ++ (show c)))
+satisfy f = MkParser $ \input => case input of
+    ""     => Failed "" "End of Input"
+    input' => 
+        let c  = strHead input' in
+        let cs = strTail input' in
+        if (f c) 
+           then Parsed cs c 
+           else Failed input' ("Found " ++ (show c))
 
+many : Parser a -> Parser (List a)
+many p = [| p :: lazy (many p) |] <|> pure []
+
+many1 : Parser a -> Parser (List a)
+many1 p = [| p :: many p |]
+      
 char : Char -> Parser Char
 char c = satisfy (== c)
 
 string : String -> Parser String
 string s = MkParser $ \input =>
     if (Prelude.Strings.length s) > (Prelude.Strings.length input)
-       then (input, Failed "Not enough input")
-       else let s' = strTake (Prelude.Strings.length s) input in
-                if s == s'
-                   then (strDrop (Prelude.Strings.length s) input, Parsed s')
-                   else (input, Failed ("Does not match " ++ s))
-    where strTake n str = let l = Prelude.Strings.unpack str in
-                              Prelude.Strings.pack $ Prelude.List.take n l
+        then Failed input "Not enough input"
+        else let s' = strTake (Prelude.Strings.length s) input in
+            if s == s'
+                then Parsed (strDrop (Prelude.Strings.length s) input) s'
+                else Failed input ("Does not match " ++ s)
+    where strTake n str = let l = Prelude.Strings.unpack str in -- inefficent 
+                            Prelude.Strings.pack $ Prelude.List.take n l
           strDrop n str = let l = Prelude.Strings.unpack str in
-                              Prelude.Strings.pack $ Prelude.List.drop n l
+                            Prelude.Strings.pack $ Prelude.List.drop n l
 
-{- many : Parser a -> Parser (List (Result String a))
-many (MkParser p) = MkParser $ \input => many' input p where 
-    many' inp pf = case pf inp of
-        (_, Failed e)    => (inp, Parsed Prelude.List.Nil)
-        (rest, Parsed x) => let (rest', xs) = (many' rest pf)
-            in x :: xs
-    sequence (Parsed []) = []
-    sequence ((Parsed x) :: xs) = Parsed $ x :: (sequence xs) -}
-    
+letter : Parser Char
+letter = satisfy (\c => ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z'))
+
 runParser : Parser a -> String -> Either String a
-runParser (MkParser f) input = 
+runParser (MkParser f) input =
   case f input of
-    (_, Failed e) => Left e
-    (_, Parsed x) => Right x
-
-
-data IdrisC = Code String | Directive String
-
-instance Show IdrisC where
-  show (Code s)      = "Code " ++ s
-  show (Directive s) = "Directive " ++ s
- 
-{- idrDirective : Parser IdrisC
-idrDirective = do
-  _ <- char '#' -}
-    
+       Failed r e => Left e
+       Parsed r x => Right x
