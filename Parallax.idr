@@ -1,80 +1,77 @@
 module Parallax
 
-class Monad m => MonadPlus (m : Type -> Type) where
-    mzero : m a
-    mplus : m a -> m a -> m a
+import Prelude.Algebra
 
-data Result e a = Failed String e 
-                | Parsed String a
+data IResult i t r = Fail i (List String) (List String)
+                   | Partial (i -> IResult i t r)
+                   | Done i r
 
-instance Functor (Result e) where
-  map _ (Failed r e) = Failed r e
-  map f (Parsed r x) = Parsed r (f x)
-    
-data Parser a = MkParser (String -> Result String a)
+instance (Show i, Show r) => Show (IResult i t r) where
+    show (Fail t stk msg) =
+      unwords ["Fail", show t, show stk, show msg]
+    show (Partial _) = "Partial _"
+    show (Done t r)  = unwords ["Done", show t, show r]
 
-instance Functor Parser where
-    map g (MkParser f) = MkParser $ \input => map g $ f input
+instance Functor (IResult i t) where
+    map _ (Fail t stk msg) = Fail t stk msg
+    map f (Partial k)      = Partial (\i => map f (k i))
+    map f (Done t r)       = Done t (f r)
 
-instance Applicative Parser where
-    pure x = MkParser (\input => Parsed input x)
+data More = Complete 
+          | Incomplete
 
-    (MkParser f) <$> x = MkParser $ \input => case f input of
-        Failed r e  => Failed r e
-        Parsed r f' => let (MkParser x') = x in map f' (x' r)
-        
-instance Alternative Parser where
-    empty = MkParser $ \input => Failed input "ParserZero: no parsing to be performed."
-    (MkParser a1) <|> a2 = MkParser $ \input =>
-      case a1 input of
-        Failed r e => let (MkParser a2') = a2 in a2' r
-        result     => result
+instance Semigroup More where
+    Complete <+> _ = Complete
+    _        <+> m = m
 
-instance Monad Parser where
-    (MkParser m) >>= f = MkParser $ \input =>
-        case m input of
-            Failed r e => Failed r e
-            Parsed r x => 
-                let (MkParser f') = f x
-                in f' r
+instance Monoid More where
+  neutral = Incomplete  
 
-satisfy : (Char -> Bool) -> Parser Char
-satisfy f = MkParser $ \input => case input of
-    ""     => Failed "" "End of Input"
-    input' => 
-        let c  = strHead input' in
-        let cs = strTail input' in
-        if (f c) 
-           then Parsed cs c 
-           else Failed input' ("Found " ++ (show c))
+record Pos : Type where
+  MkPos : (fromPos : Nat) -> Pos
 
-many : Parser a -> Parser (List a)
-many p = [| p :: lazy (many p) |] <|> pure []
+Failure : Type -> Type -> Type -> Type 
+Failure i t r = t -> Pos -> More -> (List String) -> String -> IResult i t r
 
-many1 : Parser a -> Parser (List a)
-many1 p = [| p :: many p |]
-      
-char : Char -> Parser Char
-char c = satisfy (== c)
+Success : Type -> Type -> Type -> Type -> Type
+Success i t a r = t -> Pos -> More -> a -> IResult i t r
 
-string : String -> Parser String
-string s = MkParser $ \input =>
-    if (Prelude.Strings.length s) > (Prelude.Strings.length input)
-        then Failed input "Not enough input"
-        else let s' = strTake (Prelude.Strings.length s) input in
-            if s == s'
-                then Parsed (strDrop (Prelude.Strings.length s) input) s'
-                else Failed input ("Does not match " ++ s)
-    where strTake n str = let l = Prelude.Strings.unpack str in -- inefficent 
-                            Prelude.Strings.pack $ Prelude.List.take n l
-          strDrop n str = let l = Prelude.Strings.unpack str in
-                            Prelude.Strings.pack $ Prelude.List.drop n l
+record Parser : Type -> Type -> Type -> Type where
+  MkParser : (runParser : (r : Type ** t -> Pos -> More -> Failure i t r -> Success i t a r -> IResult i t r)) -> Parser i t a
 
-letter : Parser Char
-letter = satisfy (\c => ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z'))
+typeOf : {A : Type} -> (a : A) -> Type
+typeOf {A} _ = A
 
-runParser : Parser a -> String -> Either String a
-runParser (MkParser f) input =
-  case f input of
-       Failed r e => Left e
-       Parsed r x => Right x
+instance Functor (Parser i t) where
+    map _ x = ?whooo
+
+mResultType : {a : Type} -> {b : Type} -> (a -> Parser i t b) -> Type
+mResultType {a} {b} _ = b
+
+pbind : Parser i t a -> (a -> Parser i t b) -> Parser i t b
+pbind = ?bind
+
+instance Applicative (Parser i t) where
+    pure v = MkParser (typeOf v ** kont)
+        where kont : t -> Pos -> More -> Failure i t r -> Success i t a r -> IResult i t r
+              kont t pos more fail succ = succ t pos more v
+
+    f <$> x = pbind f (\f' => pbind x (\x' => pure (f' x')))
+
+instance Monad (Parser i t) where
+    m >>= f = pbind m f
+
+{- instance Applicative (Parser i t) where
+    pure = return
+    (<*>) = do
+      b <- d
+      a <- e
+      return (b a)
+
+instance (Semigroup t) => Semigroup (Parser i t a) where
+    (<+>) = plus
+
+instance (Monoid t) => Monoid (Parser i t a) where
+  neutral = fail "empty" -}
+
+
