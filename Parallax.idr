@@ -1,4 +1,4 @@
 module Parallax
 
-import Parallax.Core
+import Parallax.ByteString.Core
 

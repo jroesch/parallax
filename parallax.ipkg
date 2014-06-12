@@ -1,3 +1,5 @@
-package effects
+package parallax
 
-modules = Parallax 
+opts = "-i ../bytestring ../text"
+
+modules = Parallax

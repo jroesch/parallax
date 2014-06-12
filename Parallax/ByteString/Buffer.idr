@@ -1,7 +1,6 @@
-module Parallax.Buffer
+module Parallax.ByteString.Buffer
 
-ByteString : Type
-ByteString = String
+import Data.ByteString
 
 record Buffer : Type where
   Buf : ByteString -> Buffer
