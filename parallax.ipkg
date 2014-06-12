@@ -1,5 +1,5 @@
 package parallax
 
-opts = "-i ../bytestring ../text"
+opts = "-i ../bytestring -i ../text"
 
 modules = Parallax
